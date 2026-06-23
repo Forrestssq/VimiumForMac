@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             button.image?.isTemplate = true
         }
         let menu = NSMenu()
-        let titleItem = NSMenuItem(title: "VimHint  —  ⌘F to activate", action: nil, keyEquivalent: "")
+        let titleItem = NSMenuItem(title: "VimHint  —  double ⌘ to activate", action: nil, keyEquivalent: "")
         titleItem.isEnabled = false
         menu.addItem(titleItem)
         menu.addItem(.separator())
@@ -38,8 +38,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Global Hotkey (CGEventTap)
 
+    // Double-tap Command detection
+    private var lastCommandDownTime: TimeInterval = 0
+    private let doubleTapThreshold: TimeInterval = 0.35
+
     private func setupGlobalHotkey() {
-        let mask = CGEventMask(1 << CGEventType.keyDown.rawValue)
+        // flagsChanged fires on every modifier key press/release
+        let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
 
         guard let tap = CGEvent.tapCreate(
@@ -65,25 +70,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCGEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        guard type == .keyDown else { return Unmanaged.passRetained(event) }
+        guard type == .flagsChanged else { return Unmanaged.passRetained(event) }
 
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         let flags = event.flags
 
-        // Cmd+F only (keycode 3), no other modifiers
-        let isF = keyCode == 3
-        let isCmdOnly = flags.contains(.maskCommand)
-            && !flags.contains(.maskShift)
-            && !flags.contains(.maskAlternate)
-            && !flags.contains(.maskControl)
-
-        guard isF && isCmdOnly else { return Unmanaged.passRetained(event) }
-
-        DispatchQueue.main.async {
-            Task { @MainActor in
-                await HintEngine.shared.activate()
-            }
+        // keyCode 55 = left ⌘, 54 = right ⌘
+        // Only react on key-DOWN (flags contain .maskCommand)
+        guard (keyCode == 55 || keyCode == 54) && flags.contains(.maskCommand) else {
+            return Unmanaged.passRetained(event)
         }
-        return nil // consume
+
+        let now = ProcessInfo.processInfo.systemUptime
+        if now - lastCommandDownTime < doubleTapThreshold {
+            lastCommandDownTime = 0
+            DispatchQueue.main.async {
+                Task { @MainActor in
+                    await HintEngine.shared.activate()
+                }
+            }
+        } else {
+            lastCommandDownTime = now
+        }
+
+        return Unmanaged.passRetained(event) // never consume ⌘ — other apps still need it
     }
 }
