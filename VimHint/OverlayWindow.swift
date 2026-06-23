@@ -78,9 +78,10 @@ final class OverlayWindow: NSWindow {
 
             let viewX = f.minX - targetScreen.frame.minX
             let viewY = f.minY - screenQuartzTop
-            let labelW: CGFloat = max(min(f.width, 80), 26)
+            // Size label to exactly fit the hint text, not the element width
+            let labelW = CGFloat(target.hint.count * 9 + 10)  // ~9px/char + 10px padding
 
-            let label = HintLabel(frame: CGRect(x: viewX, y: viewY, width: labelW, height: 22), hint: target.hint)
+            let label = HintLabel(frame: CGRect(x: viewX, y: viewY, width: labelW, height: 20), hint: target.hint)
             root.addSubview(label)
             hintLabels.append(label)
         }

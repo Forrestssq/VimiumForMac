@@ -54,7 +54,7 @@ final class HintLabel: NSView {
     private func renderText() {
         let attributed = NSMutableAttributedString()
 
-        let boldFont = NSFont.boldSystemFont(ofSize: 12)
+        let boldFont = NSFont.boldSystemFont(ofSize: 11)
         let bright: [NSAttributedString.Key: Any] = [
             .font: boldFont,
             .foregroundColor: NSColor.black,

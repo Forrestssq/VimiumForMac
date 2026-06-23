@@ -63,8 +63,7 @@ final class HintEngine {
 
         let win = OverlayWindow(screen: screen, targets: hinted) { [weak self] target in
             Task { @MainActor in
-                self?.performClick(on: target)
-                self?.deactivate()
+                self?.selectAndClick(target)
             }
         } onDismiss: { [weak self] in
             Task { @MainActor in self?.deactivate() }
@@ -74,11 +73,28 @@ final class HintEngine {
         win.show()
     }
 
+    // Close overlay → restore target app → wait → click
+    // The wait is important: some apps (SwiftUI/Settings) need to be
+    // the active app before they process click events.
+    private func selectAndClick(_ target: HintTarget) {
+        overlay?.dismiss()
+        overlay = nil
+        isActive = false
+
+        let app = previousApp
+        previousApp = nil
+        app?.activate(options: .activateIgnoringOtherApps)
+
+        Task {
+            try? await Task.sleep(nanoseconds: 80_000_000)  // 80 ms — let app regain focus
+            await MainActor.run { self.performClick(on: target) }
+        }
+    }
+
     func deactivate() {
         overlay?.dismiss()
         overlay = nil
         isActive = false
-        // Restore focus to the app that was frontmost before hint mode
         previousApp?.activate(options: .activateIgnoringOtherApps)
         previousApp = nil
     }
@@ -86,37 +102,64 @@ final class HintEngine {
     // MARK: - Click
 
     private func performClick(on target: HintTarget) {
-        // Try AX press first
-        if let el = target.element {
-            if AXUIElementPerformAction(el, kAXPressAction as CFString) == .success { return }
+        var roleRef: CFTypeRef?
+        let role = (target.element.flatMap { el -> String? in
+            AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &roleRef) == .success
+                ? roleRef as? String : nil
+        }) ?? ""
+
+        // Text fields: focus rather than press
+        if role == kAXTextFieldRole || role == kAXComboBoxRole {
+            if let el = target.element {
+                AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            }
+            cgClick(at: target.frame.mid)
+            return
         }
 
-        // Fallback: synthesize mouse click at element centre
-        let centre = CGPoint(x: target.frame.midX, y: target.frame.midY)
-        let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: centre, mouseButton: .left)
-        let up   = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp,   mouseCursorPosition: centre, mouseButton: .left)
-        down?.post(tap: .cghidEventTap)
+        // Buttons/links: try AX press; always follow with a CGEvent click
+        // so SwiftUI / Electron elements (which may silently ignore AXPress) still work.
+        if let el = target.element {
+            AXUIElementPerformAction(el, kAXPressAction as CFString)
+        }
+        cgClick(at: target.frame.mid)
+    }
+
+    private func cgClick(at point: CGPoint) {
+        let src = CGEventSource(stateID: .hidSystemState)
+        let dn = CGEvent(mouseEventSource: src, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left)
+        let up = CGEvent(mouseEventSource: src, mouseType: .leftMouseUp,   mouseCursorPosition: point, mouseButton: .left)
+        dn?.post(tap: .cghidEventTap)
         up?.post(tap: .cghidEventTap)
     }
 
-    // MARK: - Hint generation ("ASDFGHJKL")
+    // MARK: - Hint generation (prefix-free: no hint is a prefix of another)
+    //
+    // With alphabet size n=9 and target count C:
+    //   Reserve k letter-families as 2-char prefixes, rest as single-char hints.
+    //   k = ⌈(C - n) / (n - 1)⌉
+    //   Result = (n-k) single-char hints  +  k*n two-char hints  ≥ C
 
     private let chars = Array("ASDFGHJKL")
 
     private func generateHints(count: Int) -> [String] {
-        var result: [String] = []
-        var len = 1
-        while result.count < count {
-            result += combos(length: len)
-            len += 1
+        let n = chars.count
+        guard count > n else {
+            return chars.prefix(count).map { String($0) }
         }
-        return Array(result.prefix(count))
-    }
 
-    private func combos(length: Int) -> [String] {
-        guard length > 0 else { return [""] }
-        if length == 1 { return chars.map { String($0) } }
-        return chars.flatMap { c in combos(length: length - 1).map { String(c) + $0 } }
+        let k = min(Int(ceil(Double(count - n) / Double(n - 1))), n)
+        var hints: [String] = []
+
+        // Single-char hints (use the "tail" letters, leaving "head" letters for pairs)
+        for i in k..<n { hints.append(String(chars[i])) }
+
+        // Two-char hints (head letters × all letters)
+        for i in 0..<k {
+            for j in 0..<n { hints.append(String(chars[i]) + String(chars[j])) }
+        }
+
+        return Array(hints.prefix(count))
     }
 
     // MARK: - Helpers
@@ -155,4 +198,8 @@ final class HintEngine {
         let ua = a.width * a.height + b.width * b.height - ia
         return ua > 0 ? ia / ua : 0
     }
+}
+
+private extension CGRect {
+    var mid: CGPoint { CGPoint(x: midX, y: midY) }
 }
