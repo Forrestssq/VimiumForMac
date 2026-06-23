@@ -145,6 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async {
                 Task { @MainActor in await HintEngine.shared.activate() }
             }
+            return nil  // consume this ⌘ press so it doesn't dismiss open menus
         } else {
             lastCommandDownTime = now
         }

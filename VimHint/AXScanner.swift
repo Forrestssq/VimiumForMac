@@ -27,11 +27,34 @@ final class AXScanner {
         "AXColorWell",
     ]
 
-    func scan(pid: pid_t) async -> [AXResult] {
+    // Scan every regular app whose elements fall on `screen`, in parallel.
+    func scanAllApps(on screen: NSScreen) async -> [AXResult] {
+        let apps = await MainActor.run {
+            NSWorkspace.shared.runningApplications.filter {
+                $0.activationPolicy == .regular && !$0.isTerminated
+            }
+        }
+        let bounds = quartzBounds(of: screen)
+        return await withTaskGroup(of: [AXResult].self) { group in
+            for app in apps {
+                let pid = app.processIdentifier
+                group.addTask { [self] in await scan(pid: pid, bounds: bounds) }
+            }
+            var all: [AXResult] = []
+            for await r in group { all.append(contentsOf: r) }
+            return all
+        }
+    }
+
+    // Single-app scan, optionally restricted to elements inside `bounds`.
+    func scan(pid: pid_t, bounds: CGRect? = nil) async -> [AXResult] {
         await Task.detached(priority: .userInitiated) { [self] in
             var results: [AXResult] = []
             let app = AXUIElementCreateApplication(pid)
             traverse(element: app, results: &results, depth: 0)
+            if let b = bounds {
+                results = results.filter { b.intersects($0.frame) }
+            }
             return results
         }.value
     }
@@ -50,7 +73,6 @@ final class AXScanner {
             }
         }
 
-        // Always recurse into children
         var childrenRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
               let children = childrenRef as? [AXUIElement] else { return }
@@ -76,11 +98,20 @@ final class AXScanner {
 
         var pos  = CGPoint.zero
         var size = CGSize.zero
-        // AXValue is a CFType; force-cast is safe after the copy succeeds
         guard AXValueGetValue(posVal  as! AXValue, .cgPoint, &pos),
               AXValueGetValue(sizeVal as! AXValue, .cgSize,  &size) else { return nil }
 
-        // AX position is already in Quartz screen coordinates (top-left origin)
         return CGRect(origin: pos, size: size)
+    }
+
+    // Convert NSScreen frame (bottom-left origin) → Quartz bounds (top-left origin)
+    private func quartzBounds(of screen: NSScreen) -> CGRect {
+        let ph = NSScreen.screens[0].frame.height
+        return CGRect(
+            x: screen.frame.minX,
+            y: ph - screen.frame.maxY,
+            width:  screen.frame.width,
+            height: screen.frame.height
+        )
     }
 }

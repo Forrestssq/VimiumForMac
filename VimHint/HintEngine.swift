@@ -45,7 +45,9 @@ final class HintEngine {
 
         let screen = screenForApp(frontApp)
 
-        async let axTask = AXScanner.shared.scan(pid: frontApp.processIdentifier)
+        // Scan ALL visible regular apps on this screen (not just the frontmost)
+        // so Electron / Flutter apps are covered by both AX and ML simultaneously.
+        async let axTask = AXScanner.shared.scanAllApps(on: screen)
         async let mlTask = MLScanner.shared.scan(screen: screen)
         let (axResults, mlBoxes) = await (axTask, mlTask)
 
