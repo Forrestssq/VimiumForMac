@@ -46,6 +46,15 @@ final class AXScanner {
         }
     }
 
+    // Scan from an arbitrary AX root element (e.g. a focused window element).
+    func scan(root: AXUIElement) async -> [AXResult] {
+        await Task.detached(priority: .userInitiated) { [self] in
+            var results: [AXResult] = []
+            traverse(element: root, results: &results, depth: 0)
+            return results
+        }.value
+    }
+
     // Single-app scan, optionally restricted to elements inside `bounds`.
     func scan(pid: pid_t, bounds: CGRect? = nil) async -> [AXResult] {
         await Task.detached(priority: .userInitiated) { [self] in

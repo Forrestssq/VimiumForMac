@@ -37,17 +37,30 @@ final class HintEngine {
         }
         previousApp = frontApp
 
-        // Skip blocked apps
-        if let bid = frontApp.bundleIdentifier,
-           BlockedApps.shared.isBlocked(bid) {
+        if let bid = frontApp.bundleIdentifier, BlockedApps.shared.isBlocked(bid) {
             isActive = false; return
         }
 
-        let screen = screenForApp(frontApp)
+        // Resolve focused window: AX root + Quartz frame + screen
+        let (axRoot, winFrame) = focusedWindowContext(for: frontApp)
+        let screen = winFrame.flatMap { screenContaining($0) } ?? (NSScreen.main ?? NSScreen.screens[0])
 
-        async let axTask = AXScanner.shared.scan(pid: frontApp.processIdentifier)
-        async let mlTask = MLScanner.shared.scan(screen: screen)
-        let (axResults, mlBoxes) = await (axTask, mlTask)
+        // For Electron/web apps (sparse AX trees), lower ML threshold for better coverage
+        let isElectron = isElectronApp(frontApp)
+        let mlThreshold: Float = isElectron ? 0.28 : 0.38
+
+        async let axTask = AXScanner.shared.scan(root: axRoot)
+        async let mlTask = MLScanner.shared.scan(screen: screen, threshold: mlThreshold)
+        let (axResults, allMLBoxes) = await (axTask, mlTask)
+
+        // Clip ML results to the focused window's bounds so background-window
+        // elements don't bleed through when a sheet or Settings panel is open.
+        let mlBoxes: [CGRect]
+        if let f = winFrame {
+            mlBoxes = allMLBoxes.filter { f.intersects($0) }
+        } else {
+            mlBoxes = allMLBoxes
+        }
 
         var targets: [HintTarget] = axResults.map {
             HintTarget(frame: $0.frame, element: $0.element, source: .ax)
@@ -60,7 +73,7 @@ final class HintEngine {
 
         guard !targets.isEmpty else { isActive = false; return }
 
-        // Cap to 200 to avoid flooding the screen in rich UIs
+        // Cap to 200 to avoid flooding the screen in unusually rich UIs
         let capped = targets.count > 200 ? Array(targets.prefix(200)) : targets
         let hints  = generateHints(count: capped.count)
         let hinted = zip(hints, capped).map { HintedTarget(hint: $0, target: $1) }
@@ -90,7 +103,6 @@ final class HintEngine {
         let app = previousApp
         previousApp = nil
 
-        // Menu items: AXPress directly while menu is still open
         var roleRef: CFTypeRef?
         let role = (target.element.flatMap { el -> String? in
             AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &roleRef) == .success
@@ -104,7 +116,6 @@ final class HintEngine {
             return
         }
 
-        // Non-menu: restore app focus, then click
         app?.activate(options: .activateIgnoringOtherApps)
         Task {
             try? await Task.sleep(nanoseconds: 80_000_000)
@@ -142,11 +153,7 @@ final class HintEngine {
         up?.post(tap: .cghidEventTap)
     }
 
-    // MARK: - Hint generation (BFS, prefix-free, handles any count)
-    //
-    // Expand hints level-by-level; a candidate becomes a leaf only when the
-    // remaining queue already contains enough items to reach `count`.
-    // This guarantees no hint is ever a prefix of another hint.
+    // MARK: - Hint generation (BFS, prefix-free)
 
     private let chars = Array("ASDFGHJKL")
 
@@ -159,36 +166,58 @@ final class HintEngine {
         while result.count < count, !queue.isEmpty {
             let hint = queue.removeFirst()
             if result.count + queue.count + 1 >= count {
-                // Queue is big enough without expanding — make this a leaf
                 result.append(hint)
             } else {
-                // Need more hints — expand this prefix into children
                 for c in chars { queue.append(hint + String(c)) }
             }
         }
         return result
     }
 
-    // MARK: - Helpers
+    // MARK: - Window context
 
-    private func screenForApp(_ app: NSRunningApplication) -> NSScreen {
+    // Returns the AX element to scan (focused window or app) and its Quartz frame.
+    private func focusedWindowContext(for app: NSRunningApplication) -> (AXUIElement, CGRect?) {
         let appEl = AXUIElementCreateApplication(app.processIdentifier)
-        var winRef: CFTypeRef?
-        if AXUIElementCopyAttributeValue(appEl, kAXFocusedWindowAttribute as CFString, &winRef) == .success,
-           let winEl = winRef {
-            var posRef: CFTypeRef?
-            if AXUIElementCopyAttributeValue(winEl as! AXUIElement, kAXPositionAttribute as CFString, &posRef) == .success,
-               let posVal = posRef {
-                var pos = CGPoint.zero
-                AXValueGetValue(posVal as! AXValue, .cgPoint, &pos)
-                let primaryH = NSScreen.screens[0].frame.height
-                let nsPos = CGPoint(x: pos.x, y: primaryH - pos.y)
-                if let screen = NSScreen.screens.first(where: { $0.frame.contains(nsPos) }) {
-                    return screen
-                }
+
+        // Prefer focused window (handles sheets, dialogs, Settings panels).
+        // Fall back to main window, then the whole app element.
+        for attr in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+            var winRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(appEl, attr as CFString, &winRef) == .success,
+               let winEl = winRef {
+                let el = winEl as! AXUIElement
+                return (el, axFrame(el))
             }
         }
-        return NSScreen.main ?? NSScreen.screens[0]
+        return (appEl, nil)
+    }
+
+    private func axFrame(_ el: AXUIElement) -> CGRect? {
+        var posRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posRef) == .success,
+              AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let posVal = posRef, let sizeVal = sizeRef else { return nil }
+        var pos = CGPoint.zero; var size = CGSize.zero
+        guard AXValueGetValue(posVal as! AXValue, .cgPoint, &pos),
+              AXValueGetValue(sizeVal as! AXValue, .cgSize, &size) else { return nil }
+        return CGRect(origin: pos, size: size)
+    }
+
+    // Find the NSScreen whose frame (in NSScreen coords, bottom-left origin)
+    // contains the mid-point of the given Quartz frame (top-left origin).
+    private func screenContaining(_ quartzFrame: CGRect) -> NSScreen? {
+        let ph = NSScreen.screens[0].frame.height
+        let nsPos = CGPoint(x: quartzFrame.midX, y: ph - quartzFrame.midY)
+        return NSScreen.screens.first(where: { $0.frame.contains(nsPos) })
+    }
+
+    // Returns true for Electron-based apps (bundle contains Electron Framework).
+    private func isElectronApp(_ app: NSRunningApplication) -> Bool {
+        guard let url = app.bundleURL else { return false }
+        let fw = url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
+        return FileManager.default.fileExists(atPath: fw.path)
     }
 
     private func iou(_ a: CGRect, _ b: CGRect) -> CGFloat {

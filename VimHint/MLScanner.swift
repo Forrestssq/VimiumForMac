@@ -53,7 +53,7 @@ final class MLScanner {
 
     // MARK: - Inference
 
-    func scan(screen: NSScreen) async -> [CGRect] {
+    func scan(screen: NSScreen, threshold: Float = 0.38) async -> [CGRect] {
         guard let vnModel = await modelTask.value else { return [] }
         return await Task.detached(priority: .userInitiated) { [self] in
             guard let img = captureScreen(screen) else { return [] }
@@ -76,7 +76,7 @@ final class MLScanner {
             guard let obs = (request.results as? [VNCoreMLFeatureValueObservation])?.first,
                   let arr = obs.featureValue.multiArrayValue else { return [] }
 
-            return parseDetections(arr, ptW: ptW, ptH: ptH, screen: screen)
+            return parseDetections(arr, ptW: ptW, ptH: ptH, screen: screen, threshold: threshold)
         }.value
     }
 
@@ -91,9 +91,8 @@ final class MLScanner {
     // MARK: - YOLO11m output — shape (1, 5, 8400)
     // ptr[ch * 8400 + i]: ch 0=x_center, 1=y_center, 2=w, 3=h, 4=conf (640×640 pixel space)
 
-    private func parseDetections(_ arr: MLMultiArray, ptW: CGFloat, ptH: CGFloat, screen: NSScreen) -> [CGRect] {
-        let N: Int    = 8400
-        let threshold: Float = 0.38
+    private func parseDetections(_ arr: MLMultiArray, ptW: CGFloat, ptH: CGFloat, screen: NSScreen, threshold: Float = 0.38) -> [CGRect] {
+        let N: Int = 8400
         let ptr = arr.dataPointer.bindMemory(to: Float32.self, capacity: 5 * N)
 
         // Quartz top of this screen (for converting image Y → absolute Quartz Y)
