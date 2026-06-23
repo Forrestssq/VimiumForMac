@@ -1,5 +1,6 @@
 import Cocoa
 import ApplicationServices
+import ServiceManagement
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem!
@@ -57,6 +58,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menu.addItem(.separator())
+
+        // Launch at Login toggle
+        let launchEnabled = SMAppService.mainApp.status == .enabled
+        let loginItem = NSMenuItem(
+            title: launchEnabled ? "✓ Launch at Login" : "Launch at Login",
+            action: #selector(toggleLaunchAtLogin),
+            keyEquivalent: ""
+        )
+        loginItem.target = self
+        menu.addItem(loginItem)
+
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit VimHint", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
     }
@@ -65,6 +78,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let bid = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
               bid != Bundle.main.bundleIdentifier else { return }
         BlockedApps.shared.add(bid)
+        rebuildMenu()
+    }
+
+    @objc private func toggleLaunchAtLogin() {
+        do {
+            if SMAppService.mainApp.status == .enabled {
+                try SMAppService.mainApp.unregister()
+            } else {
+                try SMAppService.mainApp.register()
+            }
+        } catch {
+            print("LaunchAtLogin: \(error)")
+        }
         rebuildMenu()
     }
 
