@@ -118,13 +118,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleCGEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         // ── Hint-mode key interception ──────────────────────────────────────
         if type == .keyDown {
-            var consumed = false
             let code = event.getIntegerValueField(.keyboardEventKeycode)
-            DispatchQueue.main.sync {
-                if HintEngine.shared.isActive {
-                    HintEngine.shared.processKeyCode(code)
-                    consumed = true
-                }
+            // The CGEventTap source is attached to the main run loop (see setupGlobalEventTap),
+            // so this callback already executes on the main thread.
+            // MainActor.assumeIsolated lets us call @MainActor code without a dispatch.
+            let consumed = MainActor.assumeIsolated {
+                guard HintEngine.shared.isActive else { return false }
+                HintEngine.shared.processKeyCode(code)
+                return true
             }
             if consumed { return nil }
         }
