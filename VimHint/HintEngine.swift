@@ -53,6 +53,12 @@ final class HintEngine {
         async let mlTask = MLScanner.shared.scan(screen: screen, threshold: mlThreshold)
         let (axResults, allMLBoxes) = await (axTask, mlTask)
 
+        // Remove overlapping AX elements: sort by area descending, then drop any element
+        // whose frame is ≥80% covered by an already-kept (larger) element.
+        // This collapses AXRow + AXCell pairs in table/list views down to one hint per row,
+        // while preserving smaller interactive widgets (buttons, toggles) inside rows.
+        let axDeduped = deduplicateOverlapping(axResults)
+
         // Clip ML results to the focused window's bounds so background-window
         // elements don't bleed through when a sheet or Settings panel is open.
         let mlBoxes: [CGRect]
@@ -62,7 +68,7 @@ final class HintEngine {
             mlBoxes = allMLBoxes
         }
 
-        var targets: [HintTarget] = axResults.map {
+        var targets: [HintTarget] = axDeduped.map {
             HintTarget(frame: $0.frame, element: $0.element, source: .ax)
         }
         for box in mlBoxes {
@@ -218,6 +224,26 @@ final class HintEngine {
         guard let url = app.bundleURL else { return false }
         let fw = url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
         return FileManager.default.fileExists(atPath: fw.path)
+    }
+
+    // Drop elements whose frame is ≥80% covered by a larger element already in the set.
+    // Processes elements largest-first so outer containers win over inner duplicates.
+    private func deduplicateOverlapping(_ results: [AXResult]) -> [AXResult] {
+        let sorted = results.sorted {
+            ($0.frame.width * $0.frame.height) > ($1.frame.width * $1.frame.height)
+        }
+        var kept: [AXResult] = []
+        for r in sorted {
+            let area = r.frame.width * r.frame.height
+            guard area > 1 else { continue }
+            let dominated = kept.contains { other in
+                let inter = r.frame.intersection(other.frame)
+                guard !inter.isNull else { return false }
+                return (inter.width * inter.height) / area > 0.80
+            }
+            if !dominated { kept.append(r) }
+        }
+        return kept
     }
 
     private func iou(_ a: CGRect, _ b: CGRect) -> CGFloat {

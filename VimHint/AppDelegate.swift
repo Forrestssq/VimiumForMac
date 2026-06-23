@@ -88,9 +88,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var consumeNextCommandUp = false
 
     private func setupGlobalEventTap() {
-        // Listen to both flagsChanged (double-⌘ detection) and keyDown (hint-mode interception)
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue)
                  | CGEventMask(1 << CGEventType.keyDown.rawValue)
+                 | CGEventMask(1 << CGEventType.leftMouseDown.rawValue)
+                 | CGEventMask(1 << CGEventType.rightMouseDown.rawValue)
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
@@ -117,6 +118,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleCGEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        // ── Mouse click while hints are visible → dismiss and let click through ──
+        if type == .leftMouseDown || type == .rightMouseDown {
+            MainActor.assumeIsolated {
+                if HintEngine.shared.isActive { HintEngine.shared.deactivate() }
+            }
+            return Unmanaged.passRetained(event)
+        }
+
         // ── Hint-mode key interception ──────────────────────────────────────
         if type == .keyDown {
             let code = event.getIntegerValueField(.keyboardEventKeycode)
