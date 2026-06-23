@@ -93,7 +93,7 @@ final class MLScanner {
 
     private func parseDetections(_ arr: MLMultiArray, ptW: CGFloat, ptH: CGFloat, screen: NSScreen) -> [CGRect] {
         let N: Int    = 8400
-        let threshold: Float = 0.30
+        let threshold: Float = 0.38
         let ptr = arr.dataPointer.bindMemory(to: Float32.self, capacity: 5 * N)
 
         // Quartz top of this screen (for converting image Y → absolute Quartz Y)

@@ -45,9 +45,7 @@ final class HintEngine {
 
         let screen = screenForApp(frontApp)
 
-        // Scan ALL visible regular apps on this screen (not just the frontmost)
-        // so Electron / Flutter apps are covered by both AX and ML simultaneously.
-        async let axTask = AXScanner.shared.scanAllApps(on: screen)
+        async let axTask = AXScanner.shared.scan(pid: frontApp.processIdentifier)
         async let mlTask = MLScanner.shared.scan(screen: screen)
         let (axResults, mlBoxes) = await (axTask, mlTask)
 
@@ -62,8 +60,10 @@ final class HintEngine {
 
         guard !targets.isEmpty else { isActive = false; return }
 
-        let hints  = generateHints(count: targets.count)
-        let hinted = zip(hints, targets).map { HintedTarget(hint: $0, target: $1) }
+        // Cap to 200 to avoid flooding the screen in rich UIs
+        let capped = targets.count > 200 ? Array(targets.prefix(200)) : targets
+        let hints  = generateHints(count: capped.count)
+        let hinted = zip(hints, capped).map { HintedTarget(hint: $0, target: $1) }
 
         let win = OverlayWindow(screen: screen, targets: hinted) { [weak self] target in
             Task { @MainActor in self?.selectAndClick(target) }
