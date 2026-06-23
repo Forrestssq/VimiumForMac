@@ -1,75 +1,86 @@
 import Cocoa
 
 final class OverlayWindow: NSWindow {
-    private let targetScreen: NSScreen
-    private var targets: [HintedTarget]
+
+    // MARK: - Stored properties (var so convenience-init can set them after super.init)
+
+    private var targetScreen: NSScreen = NSScreen.main ?? NSScreen.screens[0]
+    private var targets: [HintedTarget] = []
     private var hintLabels: [HintLabel] = []
     private var typedPrefix = ""
-    private let onSelect:  (HintTarget) -> Void
-    private let onDismiss: () -> Void
+    private var onSelect:  (HintTarget) -> Void = { _ in }
+    private var onDismiss: () -> Void = {}
 
-    // MARK: - Init
+    // MARK: - Designated init (must override NSWindow's base init to prevent ObjC runtime crash)
 
-    init(
+    override init(
+        contentRect: NSRect,
+        styleMask style: NSWindow.StyleMask,
+        backing backingStoreType: NSWindow.BackingStoreType,
+        defer flag: Bool
+    ) {
+        super.init(contentRect: contentRect, styleMask: style, backing: backingStoreType, defer: flag)
+    }
+
+    // MARK: - Convenience init
+
+    convenience init(
         screen: NSScreen,
         targets: [HintedTarget],
         onSelect:  @escaping (HintTarget) -> Void,
         onDismiss: @escaping () -> Void
     ) {
-        self.targetScreen = screen
-        self.targets   = targets
-        self.onSelect  = onSelect
-        self.onDismiss = onDismiss
-
-        super.init(
+        // Init the window at the screen's frame
+        self.init(
             contentRect: screen.frame,
             styleMask: .borderless,
             backing: .buffered,
-            defer: false,
-            screen: screen
+            defer: false
         )
+        self.targetScreen = screen
+        self.targets      = targets
+        self.onSelect     = onSelect
+        self.onDismiss    = onDismiss
+        configure()
+    }
 
-        backgroundColor    = NSColor(white: 0, alpha: 0.12)
-        isOpaque           = false
-        level              = .screenSaver
-        collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
-        ignoresMouseEvents = true   // hints are keyboard-driven; mouse passes through
-        hasShadow          = false
+    // MARK: - Window configuration
+
+    private func configure() {
+        backgroundColor      = NSColor(white: 0, alpha: 0.12)
+        isOpaque             = false
+        level                = .screenSaver
+        collectionBehavior   = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        ignoresMouseEvents   = true   // keyboard-driven; mouse passes through
+        hasShadow            = false
         isReleasedWhenClosed = false
 
-        let root = FlippedView(frame: NSRect(origin: .zero, size: screen.frame.size))
+        let root = FlippedView(frame: NSRect(origin: .zero, size: targetScreen.frame.size))
         contentView = root
-
         buildLabels(in: root)
     }
 
     // MARK: - Label construction
-
-    // Coordinate mapping:
-    //   screen.frame uses NSScreen coords (y=0 at bottom of primary screen, increases up).
-    //   FlippedView has isFlipped=true → y=0 at top of view, increases down.
-    //   Quartz screen coords: y=0 at top of primary screen, increases down.
     //
-    //   For the primary screen: quartzY == flippedViewY (they share the same top-left origin).
-    //   For a secondary screen offset by NSScreen.minX/minY we subtract that offset.
+    // Coordinate mapping:
+    //   All element frames are in Quartz screen coords (y=0 at top of primary screen, y↓).
+    //   FlippedView has isFlipped=true → (0,0) at top-left, y increases downward.
+    //   For the primary screen, quartzY == flippedViewY.
+    //   For secondary screens, subtract the screen's Quartz top offset.
 
     private func buildLabels(in root: NSView) {
         let primaryH = NSScreen.screens[0].frame.height
+        // Top of our screen in Quartz coords
+        let screenQuartzTop = primaryH - targetScreen.frame.maxY
 
         for target in targets {
             let f = target.target.frame  // Quartz coords
 
-            // Convert Quartz origin to FlippedView-local coords
             let viewX = f.minX - targetScreen.frame.minX
-            // Quartz top of this screen = primaryH - targetScreen.frame.maxY
-            let screenQuartzTop = primaryH - targetScreen.frame.maxY
             let viewY = f.minY - screenQuartzTop
+            let labelW: CGFloat = max(min(f.width, 80), 26)
 
-            // Size the label to fit two-letter hints
-            let labelW: CGFloat = max(f.width < 20 ? 26 : min(f.width, 80), 26)
-            let labelFrame = CGRect(x: viewX, y: viewY, width: labelW, height: 22)
-
-            let label = HintLabel(frame: labelFrame, hint: target.hint)
+            let label = HintLabel(frame: CGRect(x: viewX, y: viewY, width: labelW, height: 22), hint: target.hint)
             root.addSubview(label)
             hintLabels.append(label)
         }
@@ -137,13 +148,12 @@ final class OverlayWindow: NSWindow {
 
     // MARK: - NSWindow overrides
 
-    override var canBecomeKey: Bool  { true }
+    override var canBecomeKey:  Bool { true }
     override var canBecomeMain: Bool { true }
 }
 
-// MARK: - Helpers
+// MARK: - FlippedView
 
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
 }
-

@@ -38,6 +38,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Global Hotkey (CGEventTap)
 
+    private func showAccessibilityAlert() {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "VimHint needs Accessibility permission"
+            alert.informativeText = "Open System Settings → Privacy & Security → Accessibility, then enable VimHint. Restart the app afterwards."
+            alert.addButton(withTitle: "Open System Settings")
+            alert.addButton(withTitle: "Later")
+            if alert.runModal() == .alertFirstButtonReturn {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+            }
+        }
+    }
+
     // Double-tap Command detection
     private var lastCommandDownTime: TimeInterval = 0
     private let doubleTapThreshold: TimeInterval = 0.35
@@ -59,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             },
             userInfo: selfPtr
         ) else {
-            print("VimHint: CGEvent tap creation failed — grant Accessibility in System Settings.")
+            showAccessibilityAlert()
             return
         }
 
