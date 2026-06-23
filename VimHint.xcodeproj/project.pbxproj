@@ -15,6 +15,7 @@
 		AA1000000000000000000006 /* OverlayWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000006 /* OverlayWindow.swift */; };
 		AA1000000000000000000007 /* HintLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000007 /* HintLabel.swift */; };
 		AA1000000000000000000008 /* KeyHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* KeyHandler.swift */; };
+		AA1000000000000000000011 /* BlockedApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* BlockedApps.swift */; };
 		AA1000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* Assets.xcassets */; };
 		AA100000000000000000000A /* model.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000A /* model.mlpackage */; };
 		AA100000000000000000000B /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000B /* Cocoa.framework */; };
@@ -36,6 +37,7 @@
 		AA000000000000000000000B /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
 		AA000000000000000000000C /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
 		AA000000000000000000000D /* Vision.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Vision.framework; path = System/Library/Frameworks/Vision.framework; sourceTree = SDKROOT; };
+		AA0000000000000000000011 /* BlockedApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedApps.swift; sourceTree = "<group>"; };
 		AA000000000000000000000E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA000000000000000000000F /* VimHint.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VimHint.entitlements; sourceTree = "<group>"; };
 		AA0000000000000000000010 /* VimHint.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VimHint.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -77,7 +79,8 @@
 				AA0000000000000000000008 /* KeyHandler.swift */,
 				AA0000000000000000000009 /* Assets.xcassets */,
 				AA000000000000000000000A /* model.mlpackage */,
-				AA000000000000000000000E /* Info.plist */,
+				AA0000000000000000000011 /* BlockedApps.swift */,
+			AA000000000000000000000E /* Info.plist */,
 				AA000000000000000000000F /* VimHint.entitlements */,
 			);
 			path = VimHint;
@@ -179,6 +182,7 @@
 				AA1000000000000000000006 /* OverlayWindow.swift in Sources */,
 				AA1000000000000000000007 /* HintLabel.swift in Sources */,
 				AA1000000000000000000008 /* KeyHandler.swift in Sources */,
+			AA1000000000000000000011 /* BlockedApps.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

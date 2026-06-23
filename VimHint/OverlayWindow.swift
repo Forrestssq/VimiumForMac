@@ -2,16 +2,14 @@ import Cocoa
 
 final class OverlayWindow: NSWindow {
 
-    // MARK: - Stored properties (var so convenience-init can set them after super.init)
-
     private var targetScreen: NSScreen = NSScreen.main ?? NSScreen.screens[0]
-    private var targets: [HintedTarget] = []
-    private var hintLabels: [HintLabel] = []
+    private var targets:   [HintedTarget] = []
+    private var hintLabels:[HintLabel]    = []
     private var typedPrefix = ""
     private var onSelect:  (HintTarget) -> Void = { _ in }
-    private var onDismiss: () -> Void = {}
+    private var onDismiss: () -> Void           = {}
 
-    // MARK: - Designated init (must override NSWindow's base init to prevent ObjC runtime crash)
+    // MARK: - Designated init (required to prevent ObjC runtime crash)
 
     override init(
         contentRect: NSRect,
@@ -30,13 +28,7 @@ final class OverlayWindow: NSWindow {
         onSelect:  @escaping (HintTarget) -> Void,
         onDismiss: @escaping () -> Void
     ) {
-        // Init the window at the screen's frame
-        self.init(
-            contentRect: screen.frame,
-            styleMask: .borderless,
-            backing: .buffered,
-            defer: false
-        )
+        self.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         self.targetScreen = screen
         self.targets      = targets
         self.onSelect     = onSelect
@@ -44,10 +36,10 @@ final class OverlayWindow: NSWindow {
         configure()
     }
 
-    // MARK: - Window configuration
+    // MARK: - Setup
 
     private func configure() {
-        backgroundColor      = NSColor(white: 0, alpha: 0.12)
+        backgroundColor      = NSColor(white: 0, alpha: 0.10)
         isOpaque             = false
         level                = .screenSaver
         collectionBehavior   = [.canJoinAllSpaces, .stationary, .ignoresCycle]
@@ -60,28 +52,28 @@ final class OverlayWindow: NSWindow {
         buildLabels(in: root)
     }
 
-    // MARK: - Label construction
+    // MARK: - Label layout
     //
-    // Coordinate mapping:
-    //   All element frames are in Quartz screen coords (y=0 at top of primary screen, y↓).
-    //   FlippedView has isFlipped=true → (0,0) at top-left, y increases downward.
-    //   For the primary screen, quartzY == flippedViewY.
-    //   For secondary screens, subtract the screen's Quartz top offset.
+    // All element frames are in Quartz points (top-left of primary screen = origin, y↓).
+    // FlippedView (isFlipped=true) shares the same orientation.
+    // For our screen: subtract the screen's Quartz top-left offset.
 
     private func buildLabels(in root: NSView) {
-        let primaryH = NSScreen.screens[0].frame.height
-        // Top of our screen in Quartz coords
-        let screenQuartzTop = primaryH - targetScreen.frame.maxY
+        let primaryH     = NSScreen.screens[0].frame.height
+        let quartzTop    = primaryH - targetScreen.frame.maxY   // Quartz Y of this screen's top
+        let quartzLeft   = targetScreen.frame.minX              // Quartz X = NSScreen X
 
         for target in targets {
-            let f = target.target.frame  // Quartz coords
+            let f = target.target.frame   // Quartz absolute coords
 
-            let viewX = f.minX - targetScreen.frame.minX
-            let viewY = f.minY - screenQuartzTop
-            // Size label to exactly fit the hint text, not the element width
-            let labelW = CGFloat(target.hint.count * 9 + 10)  // ~9px/char + 10px padding
+            let viewX = f.minX - quartzLeft
+            let viewY = f.minY - quartzTop
 
-            let label = HintLabel(frame: CGRect(x: viewX, y: viewY, width: labelW, height: 20), hint: target.hint)
+            // Label sized to hint text only (compact)
+            let labelW = CGFloat(target.hint.count * 9 + 10)
+            let frame  = CGRect(x: viewX, y: viewY, width: labelW, height: 18)
+
+            let label = HintLabel(frame: frame, hint: target.hint)
             root.addSubview(label)
             hintLabels.append(label)
         }
@@ -90,41 +82,40 @@ final class OverlayWindow: NSWindow {
     // MARK: - Lifecycle
 
     func show() {
-        makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
-
-        KeyHandler.shared.onCharacter = { [weak self] ch in
-            DispatchQueue.main.async { self?.appendTyped(ch) }
-        }
-        KeyHandler.shared.onBackspace = { [weak self] in
-            DispatchQueue.main.async { self?.deleteLastTyped() }
-        }
-        KeyHandler.shared.onEscape = { [weak self] in
-            DispatchQueue.main.async { self?.onDismiss() }
-        }
-        KeyHandler.shared.startCapturing()
+        // Use orderFront — do NOT make VimHint the active app so menus stay open.
+        // Key events are captured by AppDelegate's CGEventTap instead.
+        orderFrontRegardless()
     }
 
     func dismiss() {
-        KeyHandler.shared.stopCapturing()
-        KeyHandler.shared.onCharacter = nil
-        KeyHandler.shared.onBackspace = nil
-        KeyHandler.shared.onEscape    = nil
         close()
     }
 
+    // MARK: - Key handling (called from AppDelegate's CGEventTap)
+
+    private static let keyCodeToChar: [Int64: Character] = [
+        0: "A", 1: "S", 2: "D", 3: "F", 5: "G",
+        4: "H", 38: "J", 40: "K", 37: "L"
+    ]
+
+    func handleKeyCode(_ code: Int64) {
+        switch code {
+        case 53:                                          // Escape
+            onDismiss()
+        case 51, 117:                                     // Delete / Forward-delete
+            if !typedPrefix.isEmpty {
+                typedPrefix.removeLast()
+                applyFilter()
+            }
+        default:
+            if let ch = Self.keyCodeToChar[code] {
+                typedPrefix.append(ch)
+                applyFilter()
+            }
+        }
+    }
+
     // MARK: - Filtering
-
-    private func appendTyped(_ chars: String) {
-        typedPrefix += chars
-        applyFilter()
-    }
-
-    private func deleteLastTyped() {
-        guard !typedPrefix.isEmpty else { return }
-        typedPrefix.removeLast()
-        applyFilter()
-    }
 
     private func applyFilter() {
         for (i, label) in hintLabels.enumerated() {
@@ -149,11 +140,11 @@ final class OverlayWindow: NSWindow {
 
     // MARK: - NSWindow overrides
 
-    override var canBecomeKey:  Bool { true }
-    override var canBecomeMain: Bool { true }
+    override var canBecomeKey:  Bool { false }   // intentionally not key — menus stay open
+    override var canBecomeMain: Bool { false }
 }
 
-// MARK: - FlippedView
+// MARK: - Helpers
 
 private final class FlippedView: NSView {
     override var isFlipped: Bool { true }
