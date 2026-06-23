@@ -85,6 +85,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var lastCommandDownTime: TimeInterval = 0
     private let doubleTapThreshold: TimeInterval  = 0.35
+    private var consumeNextCommandUp = false
 
     private func setupGlobalEventTap() {
         // Listen to both flagsChanged (double-⌘ detection) and keyDown (hint-mode interception)
@@ -133,19 +134,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // ── Double-tap ⌘ to activate ────────────────────────────────────────
         guard type == .flagsChanged else { return Unmanaged.passRetained(event) }
 
-        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
-        let flags   = event.flags
-        guard (keyCode == 55 || keyCode == 54) && flags.contains(.maskCommand) else {
+        let keyCode   = event.getIntegerValueField(.keyboardEventKeycode)
+        let flags     = event.flags
+        let isCmdKey  = keyCode == 55 || keyCode == 54
+
+        // Consume the ⌘ UP that immediately follows the activating DOWN.
+        // Without this, the menu tracking loop receives an "orphan" ⌘ UP
+        // (no matching DOWN because we consumed it) and interprets that as
+        // a canceled keyboard shortcut, dismissing any open menu.
+        if isCmdKey && !flags.contains(.maskCommand) && consumeNextCommandUp {
+            consumeNextCommandUp = false
+            return nil
+        }
+
+        guard isCmdKey && flags.contains(.maskCommand) else {
             return Unmanaged.passRetained(event)
         }
 
         let now = ProcessInfo.processInfo.systemUptime
         if now - lastCommandDownTime < doubleTapThreshold {
             lastCommandDownTime = 0
+            consumeNextCommandUp = true  // consume the upcoming ⌘ UP too
             DispatchQueue.main.async {
                 Task { @MainActor in await HintEngine.shared.activate() }
             }
-            return nil  // consume this ⌘ press so it doesn't dismiss open menus
+            return nil  // consume the activating ⌘ DOWN
         } else {
             lastCommandDownTime = now
         }

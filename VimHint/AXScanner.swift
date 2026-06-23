@@ -25,6 +25,11 @@ final class AXScanner {
         "AXTab",
         "AXSegmentedControl",
         "AXColorWell",
+        // Sidebar / list / outline items:
+        // NSOutlineView rows (Finder sidebar, Xcode navigator, source lists)
+        // and NSTableView rows/cells (SwiftUI NavigationSplitView sidebars)
+        "AXRow",
+        "AXCell",
     ]
 
     // Scan every regular app whose elements fall on `screen`, in parallel.
