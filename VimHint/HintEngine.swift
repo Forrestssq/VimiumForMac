@@ -25,6 +25,7 @@ final class HintEngine {
     private var overlay: OverlayWindow?
     private var previousApp: NSRunningApplication?
     private(set) var isActive = false   // read by AppDelegate's CGEventTap
+    var isShowingOverlay: Bool { overlay != nil }
 
     // MARK: - Activate
 
@@ -41,17 +42,56 @@ final class HintEngine {
             isActive = false; return
         }
 
+        // Chromium/Electron apps don't build their AX tree until an assistive
+        // client announces itself — set the flag before scanning.
+        AXTreeEnabler.shared.enable(for: frontApp)
+
         // Resolve focused window: AX root + Quartz frame + screen
         let (axRoot, winFrame) = focusedWindowContext(for: frontApp)
         let screen = winFrame.flatMap { screenContaining($0) } ?? (NSScreen.main ?? NSScreen.screens[0])
 
         // For Electron/web apps (sparse AX trees), lower ML threshold for better coverage
-        let isElectron = isElectronApp(frontApp)
+        let isElectron = AXTreeEnabler.shared.isChromiumFamily(frontApp)
         let mlThreshold: Float = isElectron ? 0.28 : 0.38
 
-        async let axTask = AXScanner.shared.scan(root: axRoot)
         async let mlTask = MLScanner.shared.scan(screen: screen, threshold: mlThreshold)
-        let (axResults, allMLBoxes) = await (axTask, mlTask)
+
+        // If the flag was only just set, the app builds its AX tree
+        // asynchronously — a near-empty result (window chrome only) on a
+        // Chromium app means "still building", so wait briefly and rescan.
+        // Two consecutive identical counts mean the tree is done and just
+        // genuinely sparse, so stop early instead of burning all retries.
+        var axResults = await AXScanner.shared.scan(root: axRoot, webContent: isElectron)
+        if isElectron {
+            var attempts = 0
+            var previousCount = axResults.count
+            var stableScans = 0
+            while axResults.count < 10 && attempts < 4 && isActive {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                guard isActive else { break }   // canceled by a click mid-wait
+                let (root, _) = focusedWindowContext(for: frontApp)
+                axResults = await AXScanner.shared.scan(root: root, webContent: true)
+                if axResults.count == previousCount {
+                    stableScans += 1
+                    if stableScans >= 2 { break }
+                } else {
+                    stableScans = 0
+                    previousCount = axResults.count
+                }
+                attempts += 1
+            }
+        }
+        let allMLBoxes = await mlTask
+
+        // A mouse click during the scans deactivates via the CGEventTap;
+        // don't resurrect the overlay afterwards.
+        guard isActive else { return }
+
+        // Web trees report scrolled-out elements at off-window coordinates —
+        // clip AX results to the focused window like ML results are.
+        if let f = winFrame {
+            axResults = axResults.filter { f.intersects($0.frame) }
+        }
 
         // Remove overlapping AX elements: sort by area descending, then drop any element
         // whose frame is ≥80% covered by an already-kept (larger) element.
@@ -145,8 +185,12 @@ final class HintEngine {
             cgClick(at: target.frame.mid)
             return
         }
-        if let el = target.element {
-            AXUIElementPerformAction(el, kAXPressAction as CFString)
+        // Press OR click, never both — firing both toggles switches twice.
+        // Synthetic click only when the element has no working AXPress
+        // (ML-detected targets, rows/cells without press actions).
+        if let el = target.element,
+           AXUIElementPerformAction(el, kAXPressAction as CFString) == .success {
+            return
         }
         cgClick(at: target.frame.mid)
     }
@@ -217,13 +261,6 @@ final class HintEngine {
         let ph = NSScreen.screens[0].frame.height
         let nsPos = CGPoint(x: quartzFrame.midX, y: ph - quartzFrame.midY)
         return NSScreen.screens.first(where: { $0.frame.contains(nsPos) })
-    }
-
-    // Returns true for Electron-based apps (bundle contains Electron Framework).
-    private func isElectronApp(_ app: NSRunningApplication) -> Bool {
-        guard let url = app.bundleURL else { return false }
-        let fw = url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
-        return FileManager.default.fileExists(atPath: fw.path)
     }
 
     // Drop elements whose frame is ≥80% covered by a larger element already in the set.

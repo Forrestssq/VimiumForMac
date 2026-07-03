@@ -32,6 +32,13 @@ final class AXScanner {
         "AXCell",
     ]
 
+    // Web content maps unlabeled clickable <div>/<span>/icons to these generic
+    // roles (Obsidian's ribbon, tabs, and file explorer are all divs). They
+    // count as interactable only when Chromium reports an AXPress action.
+    private let webPressRoles: Set<String> = [
+        "AXGroup", "AXImage", "AXStaticText", "AXUnknown",
+    ]
+
     // Scan every regular app whose elements fall on `screen`, in parallel.
     func scanAllApps(on screen: NSScreen) async -> [AXResult] {
         let apps = await MainActor.run {
@@ -52,10 +59,12 @@ final class AXScanner {
     }
 
     // Scan from an arbitrary AX root element (e.g. a focused window element).
-    func scan(root: AXUIElement) async -> [AXResult] {
+    // `webContent: true` (Electron/Chromium apps) additionally hints generic
+    // roles carrying an AXPress action and traverses the deeper DOM nesting.
+    func scan(root: AXUIElement, webContent: Bool = false) async -> [AXResult] {
         await Task.detached(priority: .userInitiated) { [self] in
             var results: [AXResult] = []
-            traverse(element: root, results: &results, depth: 0)
+            traverse(element: root, results: &results, depth: 0, webContent: webContent)
             return results
         }.value
     }
@@ -75,15 +84,24 @@ final class AXScanner {
 
     // MARK: - Traversal
 
-    private func traverse(element: AXUIElement, results: inout [AXResult], depth: Int) {
-        guard depth < 25 else { return }
+    private func traverse(element: AXUIElement, results: inout [AXResult], depth: Int, webContent: Bool = false) {
+        guard depth < (webContent ? 45 : 25), results.count < 600 else { return }
 
         var roleRef: CFTypeRef?
         let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
 
-        if roleResult == .success, let role = roleRef as? String, interactableRoles.contains(role) {
-            if isEnabled(element), let frame = quartzFrame(element), !frame.isEmpty {
-                results.append(AXResult(frame: frame, element: element))
+        if roleResult == .success, let role = roleRef as? String {
+            if interactableRoles.contains(role) {
+                if isEnabled(element), let frame = quartzFrame(element), !frame.isEmpty {
+                    results.append(AXResult(frame: frame, element: element))
+                }
+            } else if webContent, webPressRoles.contains(role), hasPressAction(element) {
+                // Size cap keeps whole-pane clickable containers out — they
+                // would otherwise swallow their inner icons in deduplication.
+                if let frame = quartzFrame(element), !frame.isEmpty,
+                   frame.width <= 600, frame.height <= 120 {
+                    results.append(AXResult(frame: frame, element: element))
+                }
             }
         }
 
@@ -92,8 +110,15 @@ final class AXScanner {
               let children = childrenRef as? [AXUIElement] else { return }
 
         for child in children {
-            traverse(element: child, results: &results, depth: depth + 1)
+            traverse(element: child, results: &results, depth: depth + 1, webContent: webContent)
         }
+    }
+
+    private func hasPressAction(_ element: AXUIElement) -> Bool {
+        var actionsRef: CFArray?
+        guard AXUIElementCopyActionNames(element, &actionsRef) == .success,
+              let actions = actionsRef as? [String] else { return false }
+        return actions.contains(kAXPressAction as String)
     }
 
     private func isEnabled(_ element: AXUIElement) -> Bool {
