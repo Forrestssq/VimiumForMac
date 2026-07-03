@@ -53,7 +53,9 @@ final class MLScanner {
 
     // MARK: - Inference
 
-    func scan(screen: NSScreen, threshold: Float = 0.38) async -> [CGRect] {
+    /// Always detects at a low floor threshold and returns confidences —
+    /// the caller decides the cutoff based on how well AX covered the window.
+    func scan(screen: NSScreen, threshold: Float = 0.25) async -> [(box: CGRect, confidence: Float)] {
         guard let vnModel = await modelTask.value else { return [] }
         return await Task.detached(priority: .userInitiated) { [self] in
             guard let img = captureScreen(screen) else { return [] }
@@ -80,6 +82,50 @@ final class MLScanner {
         }.value
     }
 
+    // MARK: - Text detection (fallback for apps with no AX tree)
+
+    /// Detects text blocks and returns their bounding boxes in Quartz points.
+    /// Used as a last-resort hint source for apps that expose no accessibility
+    /// tree at all (WeChat's custom-rendered UI) — nearly everything clickable
+    /// there is, or sits under, a piece of text.
+    func textBoxes(screen: NSScreen) async -> [CGRect] {
+        await Task.detached(priority: .userInitiated) { [self] in
+            guard let img = captureScreen(screen) else { return [] }
+            let scale = screen.backingScaleFactor
+            let ptW = CGFloat(img.width) / scale
+            let ptH = CGFloat(img.height) / scale
+
+            let request = VNRecognizeTextRequest()
+            request.recognitionLevel = .accurate   // .fast misses CJK text
+            request.recognitionLanguages = ["zh-Hans", "en-US"]
+            request.usesLanguageCorrection = false
+            do {
+                try VNImageRequestHandler(cgImage: img, options: [:]).perform([request])
+            } catch {
+                print("MLScanner: text detection error: \(error)"); return []
+            }
+            guard let observations = request.results else { return [] }
+
+            let primaryH   = NSScreen.screens[0].frame.height
+            let quartzTop  = primaryH - screen.frame.maxY
+            let quartzLeft = screen.frame.minX
+
+            return observations.compactMap { obs in
+                let bb = obs.boundingBox   // normalized, bottom-left origin
+                let rect = CGRect(
+                    x: quartzLeft + bb.minX * ptW,
+                    y: quartzTop + (1 - bb.maxY) * ptH,
+                    width:  bb.width * ptW,
+                    height: bb.height * ptH
+                )
+                // Skip specks and full-width paragraphs
+                guard rect.width >= 10, rect.height >= 8,
+                      rect.width <= 600, rect.height <= 60 else { return nil }
+                return rect
+            }
+        }.value
+    }
+
     // MARK: - Screen capture
 
     private func captureScreen(_ screen: NSScreen) -> CGImage? { // swiftlint:disable:this identifier_name
@@ -91,7 +137,7 @@ final class MLScanner {
     // MARK: - YOLO11m output — shape (1, 5, 8400)
     // ptr[ch * 8400 + i]: ch 0=x_center, 1=y_center, 2=w, 3=h, 4=conf (640×640 pixel space)
 
-    private func parseDetections(_ arr: MLMultiArray, ptW: CGFloat, ptH: CGFloat, screen: NSScreen, threshold: Float = 0.38) -> [CGRect] {
+    private func parseDetections(_ arr: MLMultiArray, ptW: CGFloat, ptH: CGFloat, screen: NSScreen, threshold: Float) -> [(box: CGRect, confidence: Float)] {
         let N: Int = 8400
         let ptr = arr.dataPointer.bindMemory(to: Float32.self, capacity: 5 * N)
 
@@ -127,13 +173,13 @@ final class MLScanner {
 
     // MARK: - NMS
 
-    private func nms(_ boxes: [(CGRect, Float)], iouThreshold: CGFloat) -> [CGRect] {
+    private func nms(_ boxes: [(CGRect, Float)], iouThreshold: CGFloat) -> [(box: CGRect, confidence: Float)] {
         let sorted = boxes.sorted { $0.1 > $1.1 }
         var suppressed = [Bool](repeating: false, count: sorted.count)
-        var kept: [CGRect] = []
+        var kept: [(box: CGRect, confidence: Float)] = []
         for i in 0..<sorted.count {
             guard !suppressed[i] else { continue }
-            kept.append(sorted[i].0)
+            kept.append((box: sorted[i].0, confidence: sorted[i].1))
             for j in (i + 1)..<sorted.count {
                 if iou(sorted[i].0, sorted[j].0) > iouThreshold { suppressed[j] = true }
             }

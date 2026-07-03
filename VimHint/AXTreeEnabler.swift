@@ -58,8 +58,12 @@ final class AXTreeEnabler {
         // keep it off the main thread in case that app is hung.
         DispatchQueue.global(qos: .userInitiated).async {
             let el = AXUIElementCreateApplication(pid)
-            let attribute = kind == .electron ? "AXManualAccessibility" : "AXEnhancedUserInterface"
-            AXUIElementSetAttributeValue(el, attribute as CFString, kCFBooleanTrue)
+            // Electron forks (QQNT etc.) may compile out AXManualAccessibility,
+            // so also set the generic Chromium flag; unsupported ones just error.
+            if kind == .electron {
+                AXUIElementSetAttributeValue(el, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+            }
+            AXUIElementSetAttributeValue(el, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
         }
     }
 
@@ -69,15 +73,19 @@ final class AXTreeEnabler {
     }
 
     func chromiumKind(of app: NSRunningApplication) -> ChromiumKind {
-        if let url = app.bundleURL {
-            let frameworks = url.appendingPathComponent("Contents/Frameworks")
-            if FileManager.default.fileExists(
-                atPath: frameworks.appendingPathComponent("Electron Framework.framework").path) {
+        if let url = app.bundleURL,
+           let entries = try? FileManager.default.contentsOfDirectory(
+                atPath: url.appendingPathComponent("Contents/Frameworks").path) {
+            if entries.contains("Electron Framework.framework") {
                 return .electron
             }
-            if FileManager.default.fileExists(
-                atPath: frameworks.appendingPathComponent("Chromium Embedded Framework.framework").path) {
+            if entries.contains("Chromium Embedded Framework.framework") {
                 return .browser
+            }
+            // Renamed Electron forks (QQ ships "QQNT.framework") still keep
+            // the Chromium helper-app layout in Contents/Frameworks.
+            if entries.contains(where: { $0.hasSuffix("Helper (Renderer).app") }) {
+                return .electron
             }
         }
         if let bid = app.bundleIdentifier,

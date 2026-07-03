@@ -60,6 +60,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         menu.addItem(.separator())
 
+        if !CGPreflightScreenCaptureAccess() {
+            let warn = NSMenuItem(
+                title: "⚠️ Screen Recording off — visual detection disabled",
+                action: #selector(openScreenRecordingSettings),
+                keyEquivalent: ""
+            )
+            warn.target = self
+            menu.addItem(warn)
+        }
+
+        let dump = NSMenuItem(title: "Debug: Dump AX Tree of Frontmost App", action: #selector(dumpAXTree), keyEquivalent: "")
+        dump.target = self
+        menu.addItem(dump)
+
+        menu.addItem(.separator())
+
         // Launch at Login toggle
         let launchEnabled = SMAppService.mainApp.status == .enabled
         let loginItem = NSMenuItem(
@@ -101,11 +117,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         rebuildMenu()
     }
 
+    @objc private func openScreenRecordingSettings() {
+        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+    }
+
+    // Writes the raw AX tree (all roles, not just interactable ones) of the
+    // frontmost app to the Desktop — for diagnosing apps with odd AX exposure.
+    // Clicking a status-bar menu doesn't change the frontmost app.
+    @objc private func dumpAXTree() {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return }
+        let pid = app.processIdentifier
+        let header = "app: \(app.localizedName ?? "?") [\(app.bundleIdentifier ?? "")] pid \(pid)"
+        Task.detached(priority: .userInitiated) {
+            var lines = [header]
+            func str(_ el: AXUIElement, _ attr: String) -> String {
+                var ref: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(el, attr as CFString, &ref) == .success else { return "" }
+                return (ref as? String) ?? ""
+            }
+            func walk(_ el: AXUIElement, _ depth: Int) {
+                guard depth < 35, lines.count < 5000 else { return }
+                let role = str(el, kAXRoleAttribute as String)
+                let title = str(el, kAXTitleAttribute as String)
+                let desc = str(el, kAXDescriptionAttribute as String)
+
+                var posRef: CFTypeRef?; var sizeRef: CFTypeRef?
+                var frameStr = ""
+                if AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &posRef) == .success,
+                   AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &sizeRef) == .success,
+                   let p = posRef, let s = sizeRef {
+                    var pt = CGPoint.zero; var sz = CGSize.zero
+                    if AXValueGetValue(p as! AXValue, .cgPoint, &pt), AXValueGetValue(s as! AXValue, .cgSize, &sz) {
+                        frameStr = " (\(Int(pt.x)),\(Int(pt.y)) \(Int(sz.width))x\(Int(sz.height)))"
+                    }
+                }
+
+                var actionsRef: CFArray?
+                let actions = AXUIElementCopyActionNames(el, &actionsRef) == .success
+                    ? ((actionsRef as? [String]) ?? []).joined(separator: ",") : ""
+
+                let indent = String(repeating: "  ", count: depth)
+                var line = "\(indent)\(role.isEmpty ? "?" : role)\(frameStr)"
+                if !title.isEmpty { line += " title=\"\(title)\"" }
+                if !desc.isEmpty { line += " desc=\"\(desc)\"" }
+                if !actions.isEmpty { line += " actions=[\(actions)]" }
+                lines.append(line)
+
+                var childrenRef: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &childrenRef) == .success,
+                      let children = childrenRef as? [AXUIElement] else { return }
+                for c in children { walk(c, depth + 1) }
+            }
+            walk(AXUIElementCreateApplication(pid), 0)
+            let url = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent("Desktop/VimHint-AXDump.txt")
+            try? lines.joined(separator: "\n").write(to: url, atomically: true, encoding: .utf8)
+        }
+    }
+
     // MARK: - Permissions
 
     private func requestAccessibilityPermission() {
         let key = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String
         AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
+
+        // Without screen recording, MLScanner captures an empty desktop and
+        // visual detection silently finds nothing (the only coverage for
+        // apps with no AX tree, e.g. WeChat).
+        if !CGPreflightScreenCaptureAccess() {
+            CGRequestScreenCaptureAccess()
+        }
     }
 
     // MARK: - CGEventTap (handles BOTH the activation hotkey AND hint-mode key intercept)

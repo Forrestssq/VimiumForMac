@@ -39,6 +39,20 @@ final class AXScanner {
         "AXGroup", "AXImage", "AXStaticText", "AXUnknown",
     ]
 
+    // Atomic controls: nothing inside them is separately clickable, so their
+    // subtrees are skipped entirely (a big saving in dense web trees).
+    private let atomicRoles: Set<String> = [
+        kAXButtonRole, "AXLink", kAXCheckBoxRole, kAXRadioButtonRole,
+        kAXTextFieldRole, kAXPopUpButtonRole, kAXComboBoxRole,
+        "AXMenuButton", "AXDisclosureTriangle", "AXTab", "AXColorWell",
+    ]
+
+    // One IPC round-trip per element instead of one per attribute.
+    private static let batchAttributes = [
+        kAXRoleAttribute, kAXChildrenAttribute,
+        kAXPositionAttribute, kAXSizeAttribute, kAXEnabledAttribute,
+    ] as CFArray
+
     // Scan every regular app whose elements fall on `screen`, in parallel.
     func scanAllApps(on screen: NSScreen) async -> [AXResult] {
         let apps = await MainActor.run {
@@ -61,10 +75,11 @@ final class AXScanner {
     // Scan from an arbitrary AX root element (e.g. a focused window element).
     // `webContent: true` (Electron/Chromium apps) additionally hints generic
     // roles carrying an AXPress action and traverses the deeper DOM nesting.
-    func scan(root: AXUIElement, webContent: Bool = false) async -> [AXResult] {
+    // `bounds` (the window frame) prunes scrolled-out subtrees during the walk.
+    func scan(root: AXUIElement, webContent: Bool = false, bounds: CGRect? = nil) async -> [AXResult] {
         await Task.detached(priority: .userInitiated) { [self] in
             var results: [AXResult] = []
-            traverse(element: root, results: &results, depth: 0, webContent: webContent)
+            traverse(element: root, results: &results, depth: 0, webContent: webContent, bounds: bounds)
             return results
         }.value
     }
@@ -74,43 +89,59 @@ final class AXScanner {
         await Task.detached(priority: .userInitiated) { [self] in
             var results: [AXResult] = []
             let app = AXUIElementCreateApplication(pid)
-            traverse(element: app, results: &results, depth: 0)
-            if let b = bounds {
-                results = results.filter { b.intersects($0.frame) }
-            }
+            traverse(element: app, results: &results, depth: 0, bounds: bounds)
             return results
         }.value
     }
 
     // MARK: - Traversal
 
-    private func traverse(element: AXUIElement, results: inout [AXResult], depth: Int, webContent: Bool = false) {
+    private func traverse(element: AXUIElement, results: inout [AXResult], depth: Int,
+                          webContent: Bool = false, bounds: CGRect? = nil) {
         guard depth < (webContent ? 45 : 25), results.count < 600 else { return }
 
-        var roleRef: CFTypeRef?
-        let roleResult = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &roleRef)
+        // Fetch role, children, position, size, and enabled in a single IPC
+        // round-trip — the target app services these on its main thread, so
+        // round-trips are the dominant scan cost.
+        var valuesRef: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(
+                element, Self.batchAttributes, AXCopyMultipleAttributeOptions(), &valuesRef) == .success,
+              let values = valuesRef as? [AnyObject], values.count == 5 else { return }
 
-        if roleResult == .success, let role = roleRef as? String {
+        let role     = values[0] as? String
+        let children = values[1] as? [AXUIElement] ?? []
+        let frame    = quartzFrame(position: values[2], size: values[3])
+        let enabled  = (values[4] as? Bool) ?? true
+
+        // Prune subtrees that lie entirely outside the window — web trees
+        // report scrolled-out content (e.g. chat history) at off-window
+        // coordinates, and none of it can be hinted anyway.
+        if let b = bounds, let f = frame, f.width > 1, f.height > 1, !b.intersects(f) {
+            return
+        }
+
+        var descend = true
+        if let role {
             if interactableRoles.contains(role) {
-                if isEnabled(element), let frame = quartzFrame(element), !frame.isEmpty {
-                    results.append(AXResult(frame: frame, element: element))
+                if enabled, let f = frame, !f.isEmpty {
+                    results.append(AXResult(frame: f, element: element))
+                    // Nothing inside an atomic control is separately clickable.
+                    if atomicRoles.contains(role) { descend = false }
                 }
-            } else if webContent, webPressRoles.contains(role), hasPressAction(element) {
-                // Size cap keeps whole-pane clickable containers out — they
-                // would otherwise swallow their inner icons in deduplication.
-                if let frame = quartzFrame(element), !frame.isEmpty,
-                   frame.width <= 600, frame.height <= 120 {
-                    results.append(AXResult(frame: frame, element: element))
-                }
+            } else if webContent, webPressRoles.contains(role),
+                      let f = frame, !f.isEmpty,
+                      // Size cap keeps whole-pane clickable containers out —
+                      // they would swallow their inner icons in deduplication.
+                      f.width <= 600, f.height <= 120,
+                      hasPressAction(element) {
+                results.append(AXResult(frame: f, element: element))
             }
         }
 
-        var childrenRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &childrenRef) == .success,
-              let children = childrenRef as? [AXUIElement] else { return }
-
+        guard descend else { return }
         for child in children {
-            traverse(element: child, results: &results, depth: depth + 1, webContent: webContent)
+            traverse(element: child, results: &results, depth: depth + 1,
+                     webContent: webContent, bounds: bounds)
         }
     }
 
@@ -121,26 +152,16 @@ final class AXScanner {
         return actions.contains(kAXPressAction as String)
     }
 
-    private func isEnabled(_ element: AXUIElement) -> Bool {
-        var ref: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXEnabledAttribute as CFString, &ref) == .success,
-              let val = ref as? Bool else { return true }
-        return val
-    }
-
-    private func quartzFrame(_ element: AXUIElement) -> CGRect? {
-        var posRef: CFTypeRef?
-        var sizeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &posRef) == .success,
-              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success,
-              let posVal = posRef, let sizeVal = sizeRef else { return nil }
-
+    // Decode the batched AXValue position/size pair (error placeholders from
+    // AXUIElementCopyMultipleAttributeValues fail the type checks and yield nil).
+    private func quartzFrame(position: AnyObject, size: AnyObject) -> CGRect? {
+        guard CFGetTypeID(position) == AXValueGetTypeID(),
+              CFGetTypeID(size) == AXValueGetTypeID() else { return nil }
         var pos  = CGPoint.zero
-        var size = CGSize.zero
-        guard AXValueGetValue(posVal  as! AXValue, .cgPoint, &pos),
-              AXValueGetValue(sizeVal as! AXValue, .cgSize,  &size) else { return nil }
-
-        return CGRect(origin: pos, size: size)
+        var sz   = CGSize.zero
+        guard AXValueGetValue(position as! AXValue, .cgPoint, &pos),
+              AXValueGetValue(size as! AXValue, .cgSize, &sz) else { return nil }
+        return CGRect(origin: pos, size: sz)
     }
 
     // Convert NSScreen frame (bottom-left origin) → Quartz bounds (top-left origin)

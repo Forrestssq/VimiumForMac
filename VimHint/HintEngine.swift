@@ -50,18 +50,18 @@ final class HintEngine {
         let (axRoot, winFrame) = focusedWindowContext(for: frontApp)
         let screen = winFrame.flatMap { screenContaining($0) } ?? (NSScreen.main ?? NSScreen.screens[0])
 
-        // For Electron/web apps (sparse AX trees), lower ML threshold for better coverage
         let isElectron = AXTreeEnabler.shared.isChromiumFamily(frontApp)
-        let mlThreshold: Float = isElectron ? 0.28 : 0.38
 
-        async let mlTask = MLScanner.shared.scan(screen: screen, threshold: mlThreshold)
+        // Detect at a low floor; the confidence cutoff is chosen after the AX
+        // scan, once we know how well AX covered this window.
+        async let mlTask = MLScanner.shared.scan(screen: screen)
 
         // If the flag was only just set, the app builds its AX tree
         // asynchronously — a near-empty result (window chrome only) on a
         // Chromium app means "still building", so wait briefly and rescan.
         // Two consecutive identical counts mean the tree is done and just
         // genuinely sparse, so stop early instead of burning all retries.
-        var axResults = await AXScanner.shared.scan(root: axRoot, webContent: isElectron)
+        var axResults = await AXScanner.shared.scan(root: axRoot, webContent: isElectron, bounds: winFrame)
         if isElectron {
             var attempts = 0
             var previousCount = axResults.count
@@ -69,8 +69,8 @@ final class HintEngine {
             while axResults.count < 10 && attempts < 4 && isActive {
                 try? await Task.sleep(nanoseconds: 250_000_000)
                 guard isActive else { break }   // canceled by a click mid-wait
-                let (root, _) = focusedWindowContext(for: frontApp)
-                axResults = await AXScanner.shared.scan(root: root, webContent: true)
+                let (root, frame) = focusedWindowContext(for: frontApp)
+                axResults = await AXScanner.shared.scan(root: root, webContent: true, bounds: frame)
                 if axResults.count == previousCount {
                     stableScans += 1
                     if stableScans >= 2 { break }
@@ -99,14 +99,20 @@ final class HintEngine {
         // while preserving smaller interactive widgets (buttons, toggles) inside rows.
         let axDeduped = deduplicateOverlapping(axResults)
 
+        // Adaptive ML cutoff: when AX covers the window well, only confident
+        // visual detections add value; when AX is near-empty (custom-rendered
+        // UIs like WeChat expose no tree at all), accept low-confidence boxes
+        // so visual detection can carry the coverage.
+        let mlCutoff: Float = axResults.count >= 20 ? 0.38
+                            : axResults.count >= 5 ? 0.28
+                            : 0.25   // no AX tree at all — ML is the only coverage
+
         // Clip ML results to the focused window's bounds so background-window
         // elements don't bleed through when a sheet or Settings panel is open.
-        let mlBoxes: [CGRect]
-        if let f = winFrame {
-            mlBoxes = allMLBoxes.filter { f.intersects($0) }
-        } else {
-            mlBoxes = allMLBoxes
-        }
+        let mlBoxes: [CGRect] = allMLBoxes
+            .filter { $0.confidence >= mlCutoff }
+            .map { $0.box }
+            .filter { winFrame?.intersects($0) ?? true }
 
         var targets: [HintTarget] = axDeduped.map {
             HintTarget(frame: $0.frame, element: $0.element, source: .ax)
@@ -114,6 +120,19 @@ final class HintEngine {
         for box in mlBoxes {
             if !axResults.contains(where: { iou(box, $0.frame) > 0.5 }) {
                 targets.append(HintTarget(frame: box, element: nil, source: .ml))
+            }
+        }
+
+        // Last resort for apps whose window exposes no AX tree at all
+        // (WeChat's custom-rendered UI): everything clickable there carries
+        // text, so hint detected text blocks that ML didn't already cover.
+        if axResults.count < 5 && targets.count < 50 {
+            let textBoxes = await MLScanner.shared.textBoxes(screen: screen)
+            guard isActive else { return }
+            for box in textBoxes where winFrame?.intersects(box) ?? true {
+                if !targets.contains(where: { iou(box, $0.frame) > 0.3 }) {
+                    targets.append(HintTarget(frame: box, element: nil, source: .ml))
+                }
             }
         }
 
