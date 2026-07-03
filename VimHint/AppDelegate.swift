@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusBar()
         requestAccessibilityPermission()
         setupGlobalEventTap()
+        MainActor.assumeIsolated { AXTreeEnabler.shared.start() }
     }
 
     // MARK: - Status Bar
@@ -159,7 +160,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // so this callback already executes on the main thread.
             // MainActor.assumeIsolated lets us call @MainActor code without a dispatch.
             let consumed = MainActor.assumeIsolated {
-                guard HintEngine.shared.isActive else { return false }
+                // Only swallow keys once the overlay is actually on screen;
+                // while a scan is still pending, typing must pass through.
+                guard HintEngine.shared.isActive, HintEngine.shared.isShowingOverlay else { return false }
                 HintEngine.shared.processKeyCode(code)
                 return true
             }

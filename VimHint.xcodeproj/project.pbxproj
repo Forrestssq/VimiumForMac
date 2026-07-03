@@ -15,12 +15,13 @@
 		AA1000000000000000000006 /* OverlayWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000006 /* OverlayWindow.swift */; };
 		AA1000000000000000000007 /* HintLabel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000007 /* HintLabel.swift */; };
 		AA1000000000000000000008 /* KeyHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000008 /* KeyHandler.swift */; };
-		AA1000000000000000000011 /* BlockedApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* BlockedApps.swift */; };
 		AA1000000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000009 /* Assets.xcassets */; };
 		AA100000000000000000000A /* model.mlpackage in Resources */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000A /* model.mlpackage */; };
 		AA100000000000000000000B /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000B /* Cocoa.framework */; };
 		AA100000000000000000000C /* CoreML.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000C /* CoreML.framework */; };
 		AA100000000000000000000D /* Vision.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AA000000000000000000000D /* Vision.framework */; };
+		AA1000000000000000000011 /* BlockedApps.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000011 /* BlockedApps.swift */; };
+		AA1000000000000000000012 /* AXTreeEnabler.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000000000000000000012 /* AXTreeEnabler.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,10 +38,11 @@
 		AA000000000000000000000B /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
 		AA000000000000000000000C /* CoreML.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreML.framework; path = System/Library/Frameworks/CoreML.framework; sourceTree = SDKROOT; };
 		AA000000000000000000000D /* Vision.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Vision.framework; path = System/Library/Frameworks/Vision.framework; sourceTree = SDKROOT; };
-		AA0000000000000000000011 /* BlockedApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedApps.swift; sourceTree = "<group>"; };
 		AA000000000000000000000E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		AA000000000000000000000F /* VimHint.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = VimHint.entitlements; sourceTree = "<group>"; };
 		AA0000000000000000000010 /* VimHint.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VimHint.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000000000000000000011 /* BlockedApps.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BlockedApps.swift; sourceTree = "<group>"; };
+		AA0000000000000000000012 /* AXTreeEnabler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AXTreeEnabler.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -57,7 +59,7 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		CC0000000000000000000001 /* Root */ = {
+		CC0000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
 				CC0000000000000000000002 /* VimHint */,
@@ -80,7 +82,8 @@
 				AA0000000000000000000009 /* Assets.xcassets */,
 				AA000000000000000000000A /* model.mlpackage */,
 				AA0000000000000000000011 /* BlockedApps.swift */,
-			AA000000000000000000000E /* Info.plist */,
+				AA0000000000000000000012 /* AXTreeEnabler.swift */,
+				AA000000000000000000000E /* Info.plist */,
 				AA000000000000000000000F /* VimHint.entitlements */,
 			);
 			path = VimHint;
@@ -132,7 +135,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
-				LastUpgradeCheck = 1500;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					DD0000000000000000000001 = {
 						CreatedOnToolsVersion = 15.0;
@@ -182,14 +185,15 @@
 				AA1000000000000000000006 /* OverlayWindow.swift in Sources */,
 				AA1000000000000000000007 /* HintLabel.swift in Sources */,
 				AA1000000000000000000008 /* KeyHandler.swift in Sources */,
-			AA1000000000000000000011 /* BlockedApps.swift in Sources */,
+				AA1000000000000000000011 /* BlockedApps.swift in Sources */,
+				AA1000000000000000000012 /* AXTreeEnabler.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		XC0000000000000000000001 /* Debug — Project */ = {
+		XC0000000000000000000001 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -213,6 +217,7 @@
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
@@ -223,6 +228,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -247,12 +253,13 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
 		};
-		XC0000000000000000000002 /* Release — Project */ = {
+		XC0000000000000000000002 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -276,6 +283,7 @@
 				CLANG_WARN_INT_CONVERSION = YES;
 				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
 				CLANG_WARN_OBJC_IMPLICIT_RETAIN_CYCLE = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
 				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
 				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
 				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
@@ -286,6 +294,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -302,12 +311,13 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
 			name = Release;
 		};
-		XC0000000000000000000003 /* Debug — Target */ = {
+		XC0000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -316,12 +326,15 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = RRYU8HRPVR;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VimHint/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vimhint.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -330,7 +343,7 @@
 			};
 			name = Debug;
 		};
-		XC0000000000000000000004 /* Release — Target */ = {
+		XC0000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -339,12 +352,15 @@
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
+				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = RRYU8HRPVR;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = VimHint/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				MACOSX_DEPLOYMENT_TARGET = "$(RECOMMENDED_MACOSX_DEPLOYMENT_TARGET)";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.vimhint.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -375,7 +391,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = FF0000000000000000000001 /* Project object */;
 }
