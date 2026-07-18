@@ -47,6 +47,12 @@ final class AXScanner {
         "AXMenuButton", "AXDisclosureTriangle", "AXTab", "AXColorWell",
     ]
 
+    // Text-input roles for the "gi" jump-to-input feature. Chromium maps
+    // <input> to AXTextField and <textarea>/contenteditable to AXTextArea.
+    private let textInputRoles: Set<String> = [
+        kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole, "AXSearchField",
+    ]
+
     // One IPC round-trip per element instead of one per attribute.
     private static let batchAttributes = [
         kAXRoleAttribute, kAXChildrenAttribute,
@@ -90,6 +96,16 @@ final class AXScanner {
             var results: [AXResult] = []
             let app = AXUIElementCreateApplication(pid)
             traverse(element: app, results: &results, depth: 0, bounds: bounds)
+            return results
+        }.value
+    }
+
+    // Collect only text-input elements under `root` (for the "gi" feature).
+    func scanTextInputs(root: AXUIElement, webContent: Bool = false, bounds: CGRect? = nil) async -> [AXResult] {
+        await Task.detached(priority: .userInitiated) { [self] in
+            var results: [AXResult] = []
+            traverseTextInputs(element: root, results: &results, depth: 0,
+                               webContent: webContent, bounds: bounds)
             return results
         }.value
     }
@@ -142,6 +158,34 @@ final class AXScanner {
         for child in children {
             traverse(element: child, results: &results, depth: depth + 1,
                      webContent: webContent, bounds: bounds)
+        }
+    }
+
+    private func traverseTextInputs(element: AXUIElement, results: inout [AXResult], depth: Int,
+                                    webContent: Bool, bounds: CGRect?) {
+        guard depth < (webContent ? 45 : 25), results.count < 50 else { return }
+
+        var valuesRef: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(
+                element, Self.batchAttributes, AXCopyMultipleAttributeOptions(), &valuesRef) == .success,
+              let values = valuesRef as? [AnyObject], values.count == 5 else { return }
+
+        let role     = values[0] as? String
+        let children = values[1] as? [AXUIElement] ?? []
+        let frame    = quartzFrame(position: values[2], size: values[3])
+        let enabled  = (values[4] as? Bool) ?? true
+
+        if let b = bounds, let f = frame, f.width > 1, f.height > 1, !b.intersects(f) {
+            return
+        }
+
+        if let role, textInputRoles.contains(role), enabled, let f = frame, !f.isEmpty {
+            results.append(AXResult(frame: f, element: element))
+            return  // text inputs are atomic — nothing inside is a separate input
+        }
+        for child in children {
+            traverseTextInputs(element: child, results: &results, depth: depth + 1,
+                               webContent: webContent, bounds: bounds)
         }
     }
 

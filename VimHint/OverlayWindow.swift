@@ -8,6 +8,7 @@ final class OverlayWindow: NSWindow {
     private var typedPrefix = ""
     private var onSelect:   (HintTarget) -> Void = { _ in }
     private var onDismiss:  () -> Void           = {}
+    private var onFocusInput: () -> Void         = {}
 
     // MARK: - Mode
 
@@ -32,13 +33,15 @@ final class OverlayWindow: NSWindow {
         screen: NSScreen,
         targets: [HintedTarget],
         onSelect:  @escaping (HintTarget) -> Void,
-        onDismiss: @escaping () -> Void
+        onDismiss: @escaping () -> Void,
+        onFocusInput: @escaping () -> Void = {}
     ) {
         self.init(contentRect: screen.frame, styleMask: .borderless, backing: .buffered, defer: false)
         self.targetScreen = screen
         self.targets      = targets
         self.onSelect     = onSelect
         self.onDismiss    = onDismiss
+        self.onFocusInput = onFocusInput
         configure()
     }
 
@@ -104,10 +107,13 @@ final class OverlayWindow: NSWindow {
 
     // MARK: - Key handling (forwarded from AppDelegate's CGEventTap)
 
+    // No G (keycode 5): g is the command prefix for sequences like "gi".
     private static let keyCodeToChar: [Int64: Character] = [
-        0: "A", 1: "S", 2: "D", 3: "F", 5: "G",
+        0: "A", 1: "S", 2: "D", 3: "F",
         4: "H", 38: "J", 40: "K", 37: "L"
     ]
+
+    private var pendingG = false
 
     func handleKeyCode(_ code: Int64) {
         switch mode {
@@ -125,12 +131,19 @@ final class OverlayWindow: NSWindow {
         case 48:        // Tab → enter nav mode near mouse
             enterNavMode(index: indexNearestMouse())
         case 51, 117:   // Delete / Forward-delete
-            if !typedPrefix.isEmpty {
+            if pendingG {
+                pendingG = false
+            } else if !typedPrefix.isEmpty {
                 typedPrefix.removeLast()
                 applyFilter()
             }
+        case 5:         // G — command prefix (not a hint char)
+            pendingG = true
+        case 34:        // I — completes the "gi" sequence: jump to text input
+            if pendingG { onFocusInput() }
         default:
             if let ch = Self.keyCodeToChar[code] {
+                pendingG = false
                 typedPrefix.append(ch)
                 applyFilter()
             }
