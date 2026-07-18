@@ -12,6 +12,7 @@ Works on **all apps**: native AppKit/SwiftUI apps, Electron apps (Claude, VS Cod
 
 - **Hint mode** — double-tap ⌘ to show yellow letter hints on every button, link, toggle, menu item, sidebar item, text field, etc. Type the hint to click.
 - **Nav mode** — press `Tab` in hint mode to switch to keyboard navigation: `h/j/k/l` moves a blue cursor to the nearest element left/down/up/right; `Enter` clicks it; `d/u` scrolls.
+- **Jump to input** — press `gi` in hint mode to focus the window's text input (the compose box in chat apps) and start typing immediately.
 - **Backspace** to delete a typed character and widen the filter.
 - **Escape** or mouse click anywhere to dismiss.
 - **Menu-aware** — open a menu bar menu, then double-tap ⌘; the menu stays open and hints appear on the menu items.
@@ -49,8 +50,9 @@ Works on **all apps**: native AppKit/SwiftUI apps, Electron apps (Claude, VS Cod
 | Action | Key |
 |--------|-----|
 | Activate hint mode | Double-tap ⌘ |
-| Type a hint | `A` `S` `D` `F` `G` `H` `J` `K` `L` |
+| Type a hint | `A` `S` `D` `F` `H` `J` `K` `L` |
 | Delete last typed character | `Backspace` |
+| Jump to text input | `g` `i` (while hints are visible) |
 | Enter nav mode | `Tab` (while hints are visible) |
 | Navigate in nav mode | `h` `j` `k` `l` |
 | Click selected element (nav mode) | `Enter` or `Space` |
@@ -58,7 +60,7 @@ Works on **all apps**: native AppKit/SwiftUI apps, Electron apps (Claude, VS Cod
 | Scroll down / up (nav mode) | `d` / `u` |
 | Dismiss | `Esc` or mouse click |
 
-Hints use only the home-row keys `ASDFGHJKL`. Short hints (1–2 chars) appear when there are few elements; longer hints are generated automatically for dense UIs.
+Hints use only the home-row keys `ASDFHJKL` (`g` is reserved as the prefix for command sequences like `gi`). Short hints (1–2 chars) appear when there are few elements; longer hints are generated automatically for dense UIs.
 
 ---
 
@@ -84,7 +86,7 @@ Results from all layers are merged and deduplicated (IOU-based). AX elements tri
 
 ### Hint generation
 
-Hints are generated with a BFS prefix-free algorithm over the 9 home-row keys. No hint is ever a prefix of another, so typing a character either narrows the filter or immediately triggers a click when the hint is complete.
+Hints are generated with a BFS prefix-free algorithm over 8 home-row keys. No hint is ever a prefix of another, so typing a character either narrows the filter or immediately triggers a click when the hint is complete.
 
 ### Key interception
 
@@ -170,6 +172,7 @@ MIT
 
 - **提示模式** — 双击 ⌘ 键，在每个按钮、链接、开关、菜单项、侧边栏项、文本框等元素上显示黄色字母提示，输入提示字符即可点击。
 - **导航模式** — 提示模式下按 `Tab` 切换到键盘导航：`h/j/k/l` 将蓝色光标移动到左/下/上/右最近的元素；`Enter` 点击；`d/u` 滚动。
+- **跳转输入框** — 提示模式下按 `gi`，自动聚焦窗口中的文本输入框（聊天应用中即消息输入框），可立即开始打字。
 - **Backspace** 删除已输入字符，扩大过滤范围。
 - **Escape** 或点击鼠标任意位置退出。
 - **感知菜单** — 打开菜单栏菜单后双击 ⌘，菜单会保持打开状态，并在菜单项上显示提示。
@@ -206,8 +209,9 @@ MIT
 | 操作 | 按键 |
 |------|------|
 | 激活提示模式 | 双击 ⌘ |
-| 输入提示字符 | `A` `S` `D` `F` `G` `H` `J` `K` `L` |
+| 输入提示字符 | `A` `S` `D` `F` `H` `J` `K` `L` |
 | 删除最后输入的字符 | `Backspace` |
+| 跳转到输入框 | `g` `i`（提示可见时） |
 | 进入导航模式 | `Tab`（提示可见时） |
 | 导航模式下移动 | `h` `j` `k` `l` |
 | 点击选中元素（导航模式） | `Enter` 或 `Space` |
@@ -215,7 +219,7 @@ MIT
 | 向下 / 向上滚动（导航模式） | `d` / `u` |
 | 退出 | `Esc` 或点击鼠标 |
 
-提示字符只使用主排键 `ASDFGHJKL`。元素较少时会生成 1–2 位的短提示；界面元素密集时会自动生成更长的提示。
+提示字符只使用主排键 `ASDFHJKL`（`g` 保留作 `gi` 等命令序列的前缀键）。元素较少时会生成 1–2 位的短提示；界面元素密集时会自动生成更长的提示。
 
 ---
 
@@ -241,7 +245,7 @@ MIT
 
 ### 提示生成
 
-提示字符基于 9 个主排键，用 BFS 前缀无关算法生成——任何一个提示都不会是另一个提示的前缀，所以输入一个字符要么缩小过滤范围，要么在提示完整时立即触发点击。
+提示字符基于 8 个主排键，用 BFS 前缀无关算法生成——任何一个提示都不会是另一个提示的前缀，所以输入一个字符要么缩小过滤范围，要么在提示完整时立即触发点击。
 
 ### 按键拦截
 

@@ -147,6 +147,8 @@ final class HintEngine {
             Task { @MainActor in self?.selectAndClick(target) }
         } onDismiss: { [weak self] in
             Task { @MainActor in self?.deactivate() }
+        } onFocusInput: { [weak self] in
+            Task { @MainActor in self?.focusTextInput() }
         }
         overlay = win
         win.show()
@@ -188,6 +190,118 @@ final class HintEngine {
         }
     }
 
+    // "gi": dismiss the overlay and put the caret in the window's text input.
+    //
+    // Text-input roles alone over-match badly: Apple Music song titles are
+    // AXTextFields, and read-only code viewers (CodeMirror/Monaco) are
+    // contenteditable AXTextAreas that Chromium reports as editable, with
+    // near-identical attributes to a real prompt box. Selection therefore
+    // layers three signals:
+    //   1. The app's focused element, if it's a plausibly-shaped text input —
+    //      the overlay never steals focus, so this is literally "where the
+    //      caret already lives" (Vim's gi semantics). Claude's prompt box
+    //      keeps focus this way.
+    //   2. Inputs with an AXSearchField subrole or a non-empty placeholder
+    //      (placeholder goes empty once text is typed, so it can't be the
+    //      only signal). Apple Music's search field matches here.
+    //   3. Geometry: panes taller than half the window are viewers, not
+    //      inputs — drop them when anything else remains, then prefer the
+    //      bottom-most candidate (compose/prompt boxes hug the bottom edge).
+    private func focusTextInput() {
+        overlay?.dismiss()
+        overlay = nil
+        isActive = false
+
+        let app = previousApp
+        previousApp = nil
+        guard let app else { return }
+        app.activate(options: .activateIgnoringOtherApps)
+
+        Task { @MainActor in
+            let (root, winFrame) = focusedWindowContext(for: app)
+
+            var best: (frame: CGRect, element: AXUIElement)?
+
+            if let focused = focusedTextInput(of: app, winFrame: winFrame) {
+                best = focused
+            } else {
+                let webContent = AXTreeEnabler.shared.isChromiumFamily(app)
+                let inputs = await AXScanner.shared.scanTextInputs(
+                    root: root, webContent: webContent, bounds: winFrame)
+
+                let visible = inputs.filter { winFrame?.intersects($0.frame) ?? true }
+                let priority = visible.filter { looksLikeRealInput($0.element) }
+                var pool = priority.isEmpty ? visible : priority
+                if let wf = winFrame, pool.count > 1 {
+                    let short = pool.filter { $0.frame.height <= wf.height * 0.5 }
+                    if !short.isEmpty { pool = short }
+                }
+                let picked = pool.max { a, b in
+                    // Bottom-most top edge wins; ties go to the larger input.
+                    a.frame.minY == b.frame.minY
+                        ? (a.frame.width * a.frame.height) < (b.frame.width * b.frame.height)
+                        : a.frame.minY < b.frame.minY
+                }
+                if let picked { best = (picked.frame, picked.element) }
+
+                // Last resort for windows exposing no AX tree at all (WeChat's
+                // custom-rendered UI): the compose box in such chat apps hugs
+                // the bottom of the window — click there blindly. Gated on a
+                // near-empty tree so the blind click can't land on a real
+                // control in ordinary apps that merely lack text inputs.
+                if best == nil, inputs.isEmpty, let wf = winFrame {
+                    let treeSize = await AXScanner.shared.scan(
+                        root: root, webContent: webContent, bounds: winFrame).count
+                    if treeSize < 5 {
+                        try? await Task.sleep(nanoseconds: 80_000_000)
+                        cgClick(at: CGPoint(x: wf.minX + wf.width * 0.65, y: wf.maxY - 60))
+                        return
+                    }
+                }
+            }
+            guard let best else { return }
+
+            try? await Task.sleep(nanoseconds: 80_000_000)   // let the app finish activating
+            AXUIElementSetAttributeValue(best.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            cgClick(at: best.frame.mid)
+        }
+    }
+
+    // The app's currently focused element, if it's a text input shaped like
+    // one (on-window, not a half-window-plus "viewer" pane).
+    private func focusedTextInput(of app: NSRunningApplication, winFrame: CGRect?) -> (CGRect, AXUIElement)? {
+        let appEl = AXUIElementCreateApplication(app.processIdentifier)
+        var ref: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(appEl, kAXFocusedUIElementAttribute as CFString, &ref) == .success,
+              let focusedRef = ref else { return nil }
+        let el = focusedRef as! AXUIElement
+
+        var roleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &roleRef) == .success,
+              let role = roleRef as? String,
+              [kAXTextFieldRole, kAXTextAreaRole, kAXComboBoxRole, "AXSearchField"].contains(role),
+              let frame = axFrame(el), !frame.isEmpty else { return nil }
+
+        if let wf = winFrame {
+            guard wf.intersects(frame), frame.height <= wf.height * 0.5 else { return nil }
+        }
+        return (frame, el)
+    }
+
+    private func looksLikeRealInput(_ el: AXUIElement) -> Bool {
+        var ref: CFTypeRef?
+        if AXUIElementCopyAttributeValue(el, kAXSubroleAttribute as CFString, &ref) == .success,
+           (ref as? String) == "AXSearchField" {
+            return true
+        }
+        ref = nil
+        if AXUIElementCopyAttributeValue(el, "AXPlaceholderValue" as CFString, &ref) == .success,
+           let placeholder = ref as? String, !placeholder.isEmpty {
+            return true
+        }
+        return false
+    }
+
     func deactivate() {
         overlay?.dismiss()
         overlay = nil
@@ -224,7 +338,9 @@ final class HintEngine {
 
     // MARK: - Hint generation (BFS, prefix-free)
 
-    private let chars = Array("ASDFGHJKL")
+    // No G: g is reserved as the command prefix for sequences like "gi",
+    // so it must never appear as a hint label.
+    private let chars = Array("ASDFHJKL")
 
     private func generateHints(count: Int) -> [String] {
         guard count > 0 else { return [] }
